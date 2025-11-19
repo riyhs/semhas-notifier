@@ -229,7 +229,8 @@ def index():
         if email:
             if add_subscriber(email):
                 flash(
-                    "Berhasil berlangganan! Cek inbox/spam untuk memastikan.", "success"
+                    "Berhasil berlangganan! Email notifikasi akan dikirimkan jika ada data baru.",
+                    "success",
                 )
             else:
                 flash("Email ini sudah terdaftar.", "warning")
