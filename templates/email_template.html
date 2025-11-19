@@ -1,0 +1,127 @@
+<!doctype html>
+<html>
+	<head>
+		<style>
+			body {
+				font-family: Arial, sans-serif;
+				background-color: #f4f4f4;
+				margin: 0;
+				padding: 20px;
+			}
+			.container {
+				background-color: #ffffff;
+				max-width: 600px;
+				margin: 0 auto;
+				padding: 20px;
+				border-radius: 8px;
+				box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+			}
+			.header {
+				background-color: #2563eb;
+				color: white;
+				padding: 15px;
+				text-align: center;
+				border-radius: 8px 8px 0 0;
+			}
+			.content {
+				padding: 20px;
+			}
+			.card {
+				border: 1px solid #e5e7eb;
+				border-radius: 6px;
+				padding: 15px;
+				margin-bottom: 15px;
+				background-color: #fafafa;
+			}
+			.card h3 {
+				margin: 0 0 10px 0;
+				color: #1e40af;
+			}
+			.info-row {
+				margin-bottom: 5px;
+				font-size: 14px;
+				color: #4b5563;
+			}
+			.label {
+				font-weight: bold;
+				color: #374151;
+			}
+			.footer {
+				text-align: center;
+				font-size: 12px;
+				color: #9ca3af;
+				margin-top: 20px;
+				border-top: 1px solid #e5e7eb;
+				padding-top: 10px;
+			}
+			.btn-unsubscribe {
+				color: #ef4444;
+				text-decoration: underline;
+			}
+		</style>
+	</head>
+	<body>
+		<div class="container">
+			<div class="header">
+				<h2>Jadwal Semhas Baru!</h2>
+			</div>
+			<div class="content">
+				<p>Halo,</p>
+				<p>
+					Semhas Notifier mendeteksi
+					<strong
+						>{{ entries|length }} jadwal Seminar Hasil TA</strong
+					>
+					baru di website Fatisda:
+				</p>
+
+				{% for entry in entries %}
+				<div class="card">
+					<h3>{{ entry.nama }}</h3>
+					<div class="info-row">
+						<span class="label">NIM:</span> {{ entry.nim }}
+					</div>
+					<div class="info-row">
+						<span class="label">Waktu:</span> {{ entry.tanggal }},
+						{{ entry.jam_mulai }} - {{ entry.jam_selesai }}
+					</div>
+					<div class="info-row">
+						<span class="label">Ruang:</span> {{ entry.ruang }}
+					</div>
+					<div class="info-row">
+						<span class="label">Penguji:</span> <br />{{
+						entry.penguji | safe }}
+					</div>
+				</div>
+				{% endfor %}
+
+				<p style="margin-top: 20px">
+					<a
+						href="https://silat.fatisda.uns.ac.id/"
+						style="
+							background-color: #2563eb;
+							color: white;
+							padding: 10px 20px;
+							text-decoration: none;
+							border-radius: 4px;
+							display: inline-block;
+						"
+						>Buka Website SILAT</a
+					>
+				</p>
+			</div>
+			<div class="footer">
+				<p>
+					Anda menerima email ini karena berlangganan notifikasi
+					Semhas Notifier.
+				</p>
+				<p>
+					Ingin berhenti berlangganan?
+					<a href="{{ unsubscribe_link }}" class="btn-unsubscribe"
+						>Unsubscribe di sini</a
+					>
+				</p>
+			</div>
+		</div>
+	</body>
+</html>
