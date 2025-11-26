@@ -6,7 +6,7 @@ A web application that monitors the SILAT (Sistem Informasi Layanan Terintegrasi
 
 ## Features
 
-- Automated website scraping every 30 minutes
+- Automated website scraping every 60 minutes
 - Email notifications for new thesis defense schedules
 - One-click unsubscribe functionality
 - Email subscriber database management
@@ -94,7 +94,7 @@ Note: The -v flag mounts the local data directory to the container to ensure the
 
 ## How It Works
 
-1. **Scraping:** Every 30 minutes, the scheduler automatically scrapes the SILAT website to fetch the latest thesis defense schedules
+1. **Scraping:** Every 60 minutes, the scheduler automatically scrapes the SILAT website to fetch the latest thesis defense schedules
 2. **Change Detection:** New entries are compared against the previously saved data
 3. **Notifications:** If new schedules are found, email notifications are sent to all subscribers
 4. **Subscription Management:** Users can subscribe via the web interface or unsubscribe using secure tokens

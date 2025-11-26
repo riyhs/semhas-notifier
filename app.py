@@ -3,7 +3,6 @@ import logging
 import os
 import smtplib
 import sqlite3
-from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.utils import formataddr
@@ -260,9 +259,9 @@ init_db()
 
 if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not app.debug:
     scheduler = BackgroundScheduler()
-    scheduler.add_job(func=scheduled_job, trigger="interval", minutes=30)
+    scheduler.add_job(func=scheduled_job, trigger="interval", minutes=60)
     scheduler.start()
-    logger.info("Scheduler aktif (Interval: 30 menit)")
+    logger.info("Scheduler aktif (Interval: 60 menit)")
 
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=5000, use_reloader=False)
