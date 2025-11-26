@@ -2,7 +2,7 @@
 
 A web application that monitors the SILAT (Sistem Informasi Layanan Terintegrasi) website at Fatisda UNS and sends email notifications to subscribers whenever new thesis defense schedules are posted.
 
-**Live Website:** https://semhas-notifier.riyaldi.qzz.io
+**Live Website:** https://semhas-notifier.riyaldi.dev
 
 ## Features
 
