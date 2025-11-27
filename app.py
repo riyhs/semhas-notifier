@@ -12,7 +12,9 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from flask import Flask, flash, redirect, render_template, request, url_for
+from flask_limiter import Limiter
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 load_dotenv()
 
@@ -26,6 +28,9 @@ SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD")
 SMTP_SENDER_EMAIL = os.environ.get("SMTP_SENDER_EMAIL")
 SMTP_SENDER_NAME = os.environ.get("SMTP_SENDER_NAME")
 APP_BASE_URL = os.environ.get("APP_BASE_URL")
+TURNSTILE_SECRET_KEY = os.environ.get("TURNSTILE_SECRET_KEY")
+TURNSTILE_SITE_KEY = os.environ.get("TURNSTILE_SITE_KEY")
+TURNSTILE_VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
@@ -33,7 +38,20 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 app.secret_key = os.environ.get("SECRET_KEY", "rahasia_super_secure_random_string")
+
+
+def get_real_ip() -> str:
+    return request.headers.get("CF-Connecting-IP") or request.remote_addr or "127.0.0.1"
+
+
+limiter = Limiter(
+    key_func=get_real_ip,
+    app=app,
+    default_limits=["200 per day", "25 per hour"],
+    storage_uri="memory://",
+)
 
 serializer = URLSafeTimedSerializer(app.secret_key)
 
@@ -94,22 +112,23 @@ def save_current_data(data):
 
 
 def get_latest_schedule():
-    """Scraping data dari website."""
-    logger.info("Menjalankan Scraper...")
-    try:
-        response = requests.get(URL_TARGET, timeout=20)
-        response.raise_for_status()
-    except Exception as e:
-        logger.error(f"Error request ke website: {e}")
-        return None
+	"""Scraping data dari website."""
+	logger.info("Menjalankan Scraper...")
+	try:
+		headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+		response = requests.get(URL_TARGET, timeout=30, headers=headers)
+		response.raise_for_status()
+	except Exception as e:
+		logger.error(f"Error request ke website: {e}")
+		return None
 
-    soup = BeautifulSoup(response.text, "html.parser")
-    tab_pane = soup.find("div", id="2")
-    if not tab_pane:
-        return []
-    table_body = tab_pane.find("tbody")
-    if not table_body:
-        return []
+	soup = BeautifulSoup(response.text, "html.parser")
+	tab_pane = soup.find("div", id="2")
+	if not tab_pane:
+		return []
+	table_body = tab_pane.find("tbody")
+	if not table_body:
+		return []
 
     latest_data = []
     for row in table_body.find_all("tr"):
@@ -222,9 +241,43 @@ def scheduled_job():
 
 
 @app.route("/", methods=["GET", "POST"])
+@limiter.limit("5 per hour", methods=["POST"])
 def index():
+    visitor_country = request.headers.get("CF-IPCountry")
+    if visitor_country and visitor_country != "ID":
+        logger.warning(f"BLOCKED ACCESS from {visitor_country}: {request.remote_addr}")
+        return "Access Denied: Only users from Indonesia are allowed.", 403
+
     if request.method == "POST":
         email = request.form.get("email")
+        cf_token = request.form.get("cf-turnstile-response")
+
+        if TURNSTILE_SECRET_KEY:
+            if not cf_token:
+                flash("Mohon selesaikan verifikasi anti-robot.", "warning")
+                return redirect(url_for("index"))
+
+            try:
+                verify_res = requests.post(
+                    TURNSTILE_VERIFY_URL,
+                    data={
+                        "secret": TURNSTILE_SECRET_KEY,
+                        "response": cf_token,
+                        "remoteip": request.remote_addr,
+                    },
+                ).json()
+
+                if not verify_res.get("success"):
+                    flash(
+                        "Verifikasi robot gagal. Silakan refresh dan coba lagi.",
+                        "error",
+                    )
+                    return redirect(url_for("index"))
+            except Exception as e:
+                logger.error(f"Turnstile Error: {e}")
+                flash("Terjadi kesalahan sistem verifikasi.", "error")
+                return redirect(url_for("index"))
+
         if email:
             if add_subscriber(email):
                 flash(
@@ -234,7 +287,7 @@ def index():
             else:
                 flash("Email ini sudah terdaftar.", "warning")
         return redirect(url_for("index"))
-    return render_template("index.html")
+    return render_template("index.html", turnstile_site_key=TURNSTILE_SITE_KEY)
 
 
 @app.route("/unsubscribe/<token>")
