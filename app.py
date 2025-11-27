@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 import smtplib
 import sqlite3
 from email.mime.multipart import MIMEMultipart
@@ -33,7 +34,7 @@ TURNSTILE_SITE_KEY = os.environ.get("TURNSTILE_SITE_KEY")
 TURNSTILE_VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
 
 logging.basicConfig(
-	level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -43,278 +44,292 @@ app.secret_key = os.environ.get("SECRET_KEY", "rahasia_super_secure_random_strin
 
 
 def get_real_ip() -> str:
-	return request.headers.get("CF-Connecting-IP") or request.remote_addr or "127.0.0.1"
+    return request.headers.get("CF-Connecting-IP") or request.remote_addr or "127.0.0.1"
 
 
 limiter = Limiter(
-	key_func=get_real_ip,
-	app=app,
-	default_limits=["200 per day", "25 per hour"],
-	storage_uri="memory://",
+    key_func=get_real_ip,
+    app=app,
+    default_limits=["200 per day", "25 per hour"],
+    storage_uri="memory://",
 )
 
 serializer = URLSafeTimedSerializer(app.secret_key)
 
 
 def init_db():
-	"""Inisialisasi database dan folder data."""
-	os.makedirs("data", exist_ok=True)
-	conn = sqlite3.connect(DB_FILE)
-	c = conn.cursor()
-	c.execute("""CREATE TABLE IF NOT EXISTS subscribers (email TEXT PRIMARY KEY)""")
-	conn.commit()
-	conn.close()
+    """Inisialisasi database dan folder data."""
+    os.makedirs("data", exist_ok=True)
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("""CREATE TABLE IF NOT EXISTS subscribers (email TEXT PRIMARY KEY)""")
+    conn.commit()
+    conn.close()
 
 
 def get_subscribers():
-	"""Ambil semua email subscriber."""
-	conn = sqlite3.connect(DB_FILE)
-	c = conn.cursor()
-	c.execute("SELECT email FROM subscribers")
-	emails = [row[0] for row in c.fetchall()]
-	conn.close()
-	return emails
+    """Ambil semua email subscriber."""
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("SELECT email FROM subscribers")
+    emails = [row[0] for row in c.fetchall()]
+    conn.close()
+    return emails
+
+
+def is_valid_email(email):
+    pattern = r"^[\w\.-]+@[\w\.-]+\.\w+$"
+    return re.match(pattern, email) is not None
 
 
 def add_subscriber(email):
-	"""Tambah subscriber baru."""
-	try:
-		conn = sqlite3.connect(DB_FILE)
-		c = conn.cursor()
-		c.execute("INSERT INTO subscribers (email) VALUES (?)", (email,))
-		conn.commit()
-		conn.close()
-		return True
-	except sqlite3.IntegrityError:
-		return False
+    """Tambah subscriber baru."""
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
+        c.execute("INSERT INTO subscribers (email) VALUES (?)", (email,))
+        conn.commit()
+        conn.close()
+        return True
+    except sqlite3.IntegrityError:
+        return False
 
 
 def remove_subscriber(email):
-	"""Hapus subscriber."""
-	conn = sqlite3.connect(DB_FILE)
-	c = conn.cursor()
-	c.execute("DELETE FROM subscribers WHERE email = ?", (email,))
-	conn.commit()
-	conn.close()
+    """Hapus subscriber."""
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("DELETE FROM subscribers WHERE email = ?", (email,))
+    conn.commit()
+    conn.close()
 
 
 def load_previous_data():
-	try:
-		with open(FILE_STATE, "r") as f:
-			return json.load(f)
-	except FileNotFoundError:
-		return []
+    try:
+        with open(FILE_STATE, "r") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return []
 
 
 def save_current_data(data):
-	with open(FILE_STATE, "w") as f:
-		json.dump(data, f, indent=2, ensure_ascii=False)
+    with open(FILE_STATE, "w") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
 
 
 def get_latest_schedule():
-	"""Scraping data dari website."""
-	logger.info("Menjalankan Scraper...")
-	try:
-		headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
-		response = requests.get(URL_TARGET, timeout=30, headers=headers)
-		response.raise_for_status()
-	except Exception as e:
-		logger.error(f"Error request ke website: {e}")
-		return None
+    """Scraping data dari website."""
+    logger.info("Menjalankan Scraper...")
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        }
+        response = requests.get(URL_TARGET, timeout=30, headers=headers)
+        response.raise_for_status()
+    except Exception as e:
+        logger.error(f"Error request ke website: {e}")
+        return None
 
-	soup = BeautifulSoup(response.text, "html.parser")
-	tab_pane = soup.find("div", id="2")
-	if not tab_pane:
-		return []
-	table_body = tab_pane.find("tbody")
-	if not table_body:
-		return []
+    soup = BeautifulSoup(response.text, "html.parser")
+    tab_pane = soup.find("div", id="2")
+    if not tab_pane:
+        return []
+    table_body = tab_pane.find("tbody")
+    if not table_body:
+        return []
 
-	latest_data = []
-	for row in table_body.find_all("tr"):
-		cells = row.find_all("td")
-		if len(cells) >= 8:
-			penguji_text = cells[4].get_text(separator="<br>").strip()
-			entry = {
-				"tanggal": cells[1].text.strip(),
-				"nama": cells[2].text.strip(),
-				"nim": cells[3].text.strip(),
-				"penguji": penguji_text,
-				"jam_mulai": cells[5].text.strip(),
-				"jam_selesai": cells[6].text.strip(),
-				"ruang": cells[7].text.strip(),
-			}
-			latest_data.append(entry)
-	return latest_data
+    latest_data = []
+    for row in table_body.find_all("tr"):
+        cells = row.find_all("td")
+        if len(cells) >= 8:
+            penguji_text = cells[4].get_text(separator="<br>").strip()
+            entry = {
+                "tanggal": cells[1].text.strip(),
+                "nama": cells[2].text.strip(),
+                "nim": cells[3].text.strip(),
+                "penguji": penguji_text,
+                "jam_mulai": cells[5].text.strip(),
+                "jam_selesai": cells[6].text.strip(),
+                "ruang": cells[7].text.strip(),
+            }
+            latest_data.append(entry)
+    return latest_data
 
 
 def generate_unsubscribe_link(email):
-	"""Membuat link unsubscribe unik."""
-	token = serializer.dumps(email, salt="unsubscribe-salt")
-	return f"{APP_BASE_URL}/unsubscribe/{token}"
+    """Membuat link unsubscribe unik."""
+    token = serializer.dumps(email, salt="unsubscribe-salt")
+    return f"{APP_BASE_URL}/unsubscribe/{token}"
 
 
 def send_email_blast(new_entries):
-	"""Mengirim email transaksional"""
-	subscribers = get_subscribers()
-	if not subscribers:
-		return
+    """Mengirim email transaksional"""
+    subscribers = get_subscribers()
+    if not subscribers:
+        return
 
-	subject = f"Update SILAT UNS: {len(new_entries)} Jadwal Baru"
+    subject = f"Update SILAT UNS: {len(new_entries)} Jadwal Baru"
 
-	try:
-		with app.app_context():
-			with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
-				server.starttls()
-				server.login(SMTP_USER, SMTP_PASSWORD)
+    try:
+        with app.app_context():
+            with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
+                server.starttls()
+                server.login(SMTP_USER, SMTP_PASSWORD)
 
-				sent_count = 0
-				for email_dest in subscribers:
-					try:
-						unsubscribe_link = generate_unsubscribe_link(email_dest)
+                sent_count = 0
+                for email_dest in subscribers:
+                    try:
+                        unsubscribe_link = generate_unsubscribe_link(email_dest)
 
-						html_content = render_template(
-							"email_template.html",
-							entries=new_entries,
-							unsubscribe_link=unsubscribe_link,
-							app_url=APP_BASE_URL,
-						)
+                        html_content = render_template(
+                            "email_template.html",
+                            entries=new_entries,
+                            unsubscribe_link=unsubscribe_link,
+                            app_url=APP_BASE_URL,
+                        )
 
-						msg = MIMEMultipart("alternative")
-						msg["Subject"] = subject
-						msg["From"] = formataddr((SMTP_SENDER_NAME, SMTP_SENDER_EMAIL))
-						msg["To"] = email_dest
+                        msg = MIMEMultipart("alternative")
+                        msg["Subject"] = subject
+                        msg["From"] = formataddr((SMTP_SENDER_NAME, SMTP_SENDER_EMAIL))
+                        msg["To"] = email_dest
 
-						msg.add_header("List-Unsubscribe", f"<{unsubscribe_link}>")
-						msg.add_header(
-							"List-Unsubscribe-Post", "List-Unsubscribe=One-Click"
-						)
-						msg.add_header("Precedence", "bulk")
-						msg.add_header(
-							"X-Auto-Response-Suppress", "OOF, DR, RN, NRN, AutoReply"
-						)
+                        msg.add_header("List-Unsubscribe", f"<{unsubscribe_link}>")
+                        msg.add_header(
+                            "List-Unsubscribe-Post", "List-Unsubscribe=One-Click"
+                        )
+                        msg.add_header("Precedence", "bulk")
+                        msg.add_header(
+                            "X-Auto-Response-Suppress", "OOF, DR, RN, NRN, AutoReply"
+                        )
 
-						text_content = f"Ada {len(new_entries)} jadwal baru. Buka {URL_TARGET}. Unsubscribe: {unsubscribe_link}"
-						part1 = MIMEText(text_content, "plain", "utf-8")
-						part2 = MIMEText(html_content, "html", "utf-8")
+                        text_content = f"Ada {len(new_entries)} jadwal baru. Buka {URL_TARGET}. Unsubscribe: {unsubscribe_link}"
+                        part1 = MIMEText(text_content, "plain", "utf-8")
+                        part2 = MIMEText(html_content, "html", "utf-8")
 
-						msg.attach(part1)
-						msg.attach(part2)
+                        msg.attach(part1)
+                        msg.attach(part2)
 
-						server.send_message(msg)
-						sent_count += 1
-					except Exception as e:
-						logger.error(f"Gagal kirim ke {email_dest}: {e}")
+                        server.send_message(msg)
+                        sent_count += 1
+                    except Exception as e:
+                        logger.error(f"Gagal kirim ke {email_dest}: {e}")
 
-			logger.info(
-				f"Laporan: Email terkirim ke {sent_count}/{len(subscribers)} subscriber."
-			)
+            logger.info(
+                f"Laporan: Email terkirim ke {sent_count}/{len(subscribers)} subscriber."
+            )
 
-	except Exception as e:
-		logger.error(f"SMTP Error Utama: {e}")
+    except Exception as e:
+        logger.error(f"SMTP Error Utama: {e}")
 
 
 def scheduled_job():
-	"""Fungsi Scraper yang dijalankan Scheduler."""
-	with app.app_context():
-		current_data = get_latest_schedule()
-		if not current_data:
-			return
+    """Fungsi Scraper yang dijalankan Scheduler."""
+    with app.app_context():
+        current_data = get_latest_schedule()
+        if not current_data:
+            return
 
-		previous_data = load_previous_data()
-		previous_ids = {
-			f"{d['nim']}-{d['tanggal']}-{d['jam_mulai']}" for d in previous_data
-		}
+        previous_data = load_previous_data()
+        previous_ids = {
+            f"{d['nim']}-{d['tanggal']}-{d['jam_mulai']}" for d in previous_data
+        }
 
-		new_entries = []
-		for entry in current_data:
-			entry_id = f"{entry['nim']}-{entry['tanggal']}-{entry['jam_mulai']}"
-			if entry_id not in previous_ids:
-				new_entries.append(entry)
+        new_entries = []
+        for entry in current_data:
+            entry_id = f"{entry['nim']}-{entry['tanggal']}-{entry['jam_mulai']}"
+            if entry_id not in previous_ids:
+                new_entries.append(entry)
 
-		if new_entries:
-			logger.info(
-				f"Ditemukan {len(new_entries)} data baru. Mengirim notifikasi..."
-			)
-			send_email_blast(new_entries)
-			save_current_data(current_data)
+        if new_entries:
+            logger.info(
+                f"Ditemukan {len(new_entries)} data baru. Mengirim notifikasi..."
+            )
+            send_email_blast(new_entries)
+            save_current_data(current_data)
 
 
 @app.route("/", methods=["GET", "POST"])
 @limiter.limit("5 per hour", methods=["POST"])
 def index():
-	visitor_country = request.headers.get("CF-IPCountry")
-	if visitor_country and visitor_country != "ID":
-		logger.warning(f"BLOCKED ACCESS from {visitor_country}: {request.remote_addr}")
-		return "Access Denied: Only users from Indonesia are allowed.", 403
+    visitor_country = request.headers.get("CF-IPCountry")
+    if visitor_country and visitor_country != "ID":
+        logger.warning(f"BLOCKED ACCESS from {visitor_country}: {request.remote_addr}")
+        return "Access Denied: Only users from Indonesia are allowed.", 403
 
-	if request.method == "POST":
-		email = request.form.get("email")
-		cf_token = request.form.get("cf-turnstile-response")
+    if request.method == "POST":
+        email = request.form.get("email")
+        cf_token = request.form.get("cf-turnstile-response")
 
-		if TURNSTILE_SECRET_KEY:
-			if not cf_token:
-				flash("Mohon selesaikan verifikasi anti-robot.", "warning")
-				return redirect(url_for("index"))
+        if TURNSTILE_SECRET_KEY:
+            if not cf_token:
+                flash("Mohon selesaikan verifikasi anti-robot.", "warning")
+                return redirect(url_for("index"))
 
-			try:
-				verify_res = requests.post(
-					TURNSTILE_VERIFY_URL,
-					data={
-						"secret": TURNSTILE_SECRET_KEY,
-						"response": cf_token,
-						"remoteip": request.remote_addr,
-					},
-				).json()
+            try:
+                verify_res = requests.post(
+                    TURNSTILE_VERIFY_URL,
+                    data={
+                        "secret": TURNSTILE_SECRET_KEY,
+                        "response": cf_token,
+                        "remoteip": request.remote_addr,
+                    },
+                ).json()
 
-				if not verify_res.get("success"):
-					flash(
-						"Verifikasi robot gagal. Silakan refresh dan coba lagi.",
-						"error",
-					)
-					return redirect(url_for("index"))
-			except Exception as e:
-				logger.error(f"Turnstile Error: {e}")
-				flash("Terjadi kesalahan sistem verifikasi.", "error")
-				return redirect(url_for("index"))
+                if not verify_res.get("success"):
+                    flash(
+                        "Verifikasi robot gagal. Silakan refresh dan coba lagi.",
+                        "error",
+                    )
+                    return redirect(url_for("index"))
+            except Exception as e:
+                logger.error(f"Turnstile Error: {e}")
+                flash("Terjadi kesalahan sistem verifikasi.", "error")
+                return redirect(url_for("index"))
 
-		if email:
-			if add_subscriber(email):
-				flash(
-					"Berhasil berlangganan! Email notifikasi akan dikirimkan jika ada data baru.",
-					"success",
-				)
-			else:
-				flash("Email ini sudah terdaftar.", "warning")
-		return redirect(url_for("index"))
-	return render_template("index.html", turnstile_site_key=TURNSTILE_SITE_KEY)
+        if email:
+            if not is_valid_email(email):
+                flash(
+                    "Format email tidak valid! Harap masukkan email yang benar.",
+                    "error",
+                )
+                return redirect(url_for("index"))
+
+            if add_subscriber(email):
+                flash(
+                    "Berhasil berlangganan! Email notifikasi akan dikirimkan jika ada data baru.",
+                    "success",
+                )
+            else:
+                flash("Email ini sudah terdaftar.", "warning")
+        return redirect(url_for("index"))
+    return render_template("index.html", turnstile_site_key=TURNSTILE_SITE_KEY)
 
 
 @app.route("/unsubscribe/<token>")
 def unsubscribe(token):
-	try:
-		email = serializer.loads(token, salt="unsubscribe-salt", max_age=604800)
-		remove_subscriber(email)
-		return render_template("unsubscribe.html", email=email, success=True)
-	except SignatureExpired:
-		return render_template(
-			"unsubscribe.html",
-			error="Link unsubscribe sudah kadaluarsa.",
-			success=False,
-		)
-	except BadSignature:
-		return render_template(
-			"unsubscribe.html", error="Link unsubscribe tidak valid.", success=False
-		)
+    try:
+        email = serializer.loads(token, salt="unsubscribe-salt", max_age=604800)
+        remove_subscriber(email)
+        return render_template("unsubscribe.html", email=email, success=True)
+    except SignatureExpired:
+        return render_template(
+            "unsubscribe.html",
+            error="Link unsubscribe sudah kadaluarsa.",
+            success=False,
+        )
+    except BadSignature:
+        return render_template(
+            "unsubscribe.html", error="Link unsubscribe tidak valid.", success=False
+        )
 
 
 init_db()
 
 if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not app.debug:
-	scheduler = BackgroundScheduler()
-	scheduler.add_job(func=scheduled_job, trigger="interval", minutes=60)
-	scheduler.start()
-	logger.info("Scheduler aktif (Interval: 60 menit)")
+    scheduler = BackgroundScheduler()
+    scheduler.add_job(func=scheduled_job, trigger="interval", minutes=60)
+    scheduler.start()
+    logger.info("Scheduler aktif (Interval: 60 menit)")
 
 if __name__ == "__main__":
-	app.run(debug=True, host="0.0.0.0", port=5000, use_reloader=False)
+    app.run(debug=True, host="0.0.0.0", port=5000, use_reloader=False)
